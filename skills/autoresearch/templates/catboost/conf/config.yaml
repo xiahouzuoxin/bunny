@@ -1,0 +1,36 @@
+# CatBoost template config — managed via Hydra
+# Usage: python train.py --config-name config model.iterations=5000
+
+task: regression  # regression, binary, or multiclass
+
+data:
+  train_path: ???  # REQUIRED — data path (CSV, Parquet, or S3 URI)
+  target_column: ???  # REQUIRED — label column name
+  exclude_columns: []
+  numerical_fillna: -1.0
+
+model:
+  # CatBoost defaults — only override what we intentionally change
+  iterations: 1000  # default 1000, raised because early_stopping_rounds handles cutoff
+  # depth: 6  # CatBoost default
+  # learning_rate: auto  # CatBoost auto-tunes based on iterations
+  # l2_leaf_reg: 3.0  # CatBoost default
+  loss_function: RMSE  # regression: RMSE, MAE; binary: Logloss; multiclass: MultiClass
+  eval_metric: RMSE  # regression: RMSE, MAE; binary: AUC, Logloss; multiclass: Accuracy, MultiClass
+  cat_features: auto  # "auto" detects object/category dtype; or list column names
+  early_stopping_rounds: 100  # default None, set for autoresearch loop
+  verbose: 100
+  random_seed: 42
+  task_type: CPU  # CPU or GPU
+
+train:
+  test_frac: 0.2
+  random_seed: 42
+  output_dir: outputs
+  timeout_seconds: 3000  # stop training early if elapsed time exceeds this (seconds), ~50 min
+
+predict:
+  enabled: true
+  input_data: null
+  model_path: outputs/model.cbm
+  batch_size: 4096

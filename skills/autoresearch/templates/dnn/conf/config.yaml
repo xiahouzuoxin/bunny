@@ -1,0 +1,46 @@
+# DNN template config — managed via Hydra
+# Usage: python train.py --config-name config train.epochs=100 model.hidden_units=[256,128]
+
+task: regression  # regression, binary, or multiclass
+
+data:
+  train_path: ???  # REQUIRED — data path (CSV, Parquet, or S3 URI)
+  target_column: ???  # REQUIRED — label column name
+  exclude_columns: []
+  numerical_fillna: -1.0
+
+model:
+  hidden_units: [256, 128, 64]
+  emb_dim: 16
+  dropout: 0.3
+  batch_norm: true
+  output_dim: 1  # auto-set by train.py: 1 for regression/binary, num_classes for multiclass
+  num_classes: null  # auto-detected for multiclass
+
+train:
+  epochs: 50
+  batch_size: 512
+  use_gpu: false
+  test_frac: 0.2
+  random_seed: 42
+  output_dir: outputs
+  timeout_seconds: 3000  # stop training early if elapsed time exceeds this (seconds), ~50 min
+  loss_fn: mse  # regression: mse, mae, huber; binary: bce; multiclass: cross_entropy
+  early_stopping_patience: 10  # stop if no improvement for this many epochs
+  gradient_clip_norm: 1.0  # max gradient norm for clipping
+
+  optimizer:
+    type: adamw
+    learning_rate: 1.0e-3
+    weight_decay: 1.0e-3
+
+  lr_scheduler:
+    type: cosine
+    # cosine annealing over all epochs, no config needed
+    # for step_lr: step_size: 5, gamma: 0.5
+
+predict:
+  enabled: true
+  input_data: null
+  model_path: outputs/model.pt
+  batch_size: 4096
