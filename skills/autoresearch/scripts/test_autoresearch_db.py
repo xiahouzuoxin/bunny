@@ -34,6 +34,37 @@ class StateTests(unittest.TestCase):
         self.start("baseline")
         self.finish("baseline")
 
+    def import_baseline(self, **changes):
+        db.put_contract(self.conn, "2", {"BASELINE": {"commit": "historical"}})
+        record = dict(exp_id="import", iteration=0, contract_version="2",
+                      commit="historical", parent_commit="contract-base",
+                      status="kept", metrics={"auc": .8}, summary="Imported; code reviewed")
+        record.update(changes)
+        db.put_experiment(self.conn, record)
+
+    def test_import_keeps_source_sha_but_branches_from_contract_baseline(self):
+        self.import_baseline()
+        self.import_baseline()  # replay does not create another baseline
+        baseline = db.latest_kept(self.conn)
+        self.assertEqual(baseline["commit"], "historical")
+        self.assertIsNone(baseline["start_time"])
+        self.assertEqual(db.recovery_state(self.conn, "contract-base")["state"], "clean")
+        self.assertEqual(db.recovery_state(self.conn, "historical")["state"], "inconsistent")
+        with self.assertRaises(ValueError):
+            self.start("wrong", 1, "wrong", "historical", contract_version="2")
+        self.start("candidate", 1, "candidate", "contract-base", contract_version="2")
+        self.assertEqual(db.recovery_state(self.conn, "candidate")["state"], "integrated-pending")
+        self.finish("candidate")
+        self.assertEqual(db.recovery_state(self.conn, "candidate")["state"], "clean")
+        self.start("next", 2, "next", "candidate", contract_version="2")
+
+    def test_import_requires_metrics_source_and_anchor(self):
+        for changes in ({"metrics": {}}, {"metrics": None},
+                        {"parent_commit": None}, {"commit": "unconfirmed"},
+                        {"status": "running"}):
+            with self.subTest(changes=changes), self.assertRaises(ValueError):
+                self.import_baseline(**changes)
+
     def test_baseline_retry_preserves_history(self):
         self.assertEqual(db.recovery_state(self.conn, "before")["state"], "fresh")
         self.start("b1")

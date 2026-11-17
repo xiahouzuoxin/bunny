@@ -194,6 +194,18 @@ def list_contracts(conn: sqlite3.Connection) -> list[dict[str, object]]:
     ]
 
 
+def supplied_baseline(conn: sqlite3.Connection, record: dict) -> bool:
+    contract = get_contract(conn, record["contract_version"])
+    source = contract["contract"].get("BASELINE") if contract else None
+    return (record.get("iteration") == 0 and isinstance(source, dict)
+            and bool(source.get("commit")) and source["commit"] == record.get("commit"))
+
+
+def effective_commit(conn: sqlite3.Connection, record: dict) -> str:
+    """Imported metrics retain their source SHA; code starts at contract baseline."""
+    return record["parent_commit"] if supplied_baseline(conn, record) else record["commit"]
+
+
 def put_experiment(conn: sqlite3.Connection, record: object) -> None:
     if not isinstance(record, dict):
         raise ValueError("experiment record must be a JSON object")
@@ -226,9 +238,10 @@ def put_experiment(conn: sqlite3.Connection, record: object) -> None:
         previous_status = existing["status"]
         if previous_status in TERMINAL_STATUSES and record != existing:
             raise ValueError(f"terminal experiment {exp_id} is immutable")
-    elif record["status"] != "running":
+    elif record["status"] != "running" and not (
+            supplied_baseline(conn, record) and record["status"] == "kept"):
         raise ValueError("new experiments must start as running")
-    validate_experiment(record)
+    validate_experiment(record, imported=supplied_baseline(conn, record))
     if not existing:
         history = experiments(conn)
         kept = latest_kept(conn)
@@ -239,7 +252,7 @@ def put_experiment(conn: sqlite3.Connection, record: object) -> None:
             if kept or active:
                 raise ValueError("finish the previous baseline attempt before retrying")
         else:
-            if kept is None or record["parent_commit"] != kept["commit"]:
+            if kept is None or record["parent_commit"] != effective_commit(conn, kept):
                 raise ValueError("experiments must start from the latest kept commit")
             if record["commit"] == record["parent_commit"]:
                 raise ValueError("experiment commit must differ from its parent")
@@ -296,13 +309,17 @@ def put_experiment(conn: sqlite3.Connection, record: object) -> None:
         )
 
 
-def validate_experiment(record: dict[str, object]) -> None:
+def validate_experiment(record: dict[str, object], imported: bool = False) -> None:
     status = str(record["status"])
     required = set(IDENTITY_FIELDS)
     if status in TERMINAL_STATUSES:
         required |= {"end_time", "summary"}
     if status in {"kept", "dropped"}:
         required.add("metrics")
+    if imported:
+        required -= {"workspace", "start_time", "end_time", "hypothesis"}
+        if record.get("status") != "kept" or not record.get("metrics"):
+            raise ValueError("supplied baseline requires kept status and non-empty metrics")
     missing = sorted(field for field in required if record.get(field) is None)
     if missing:
         raise ValueError(f"{status} experiment requires: {', '.join(missing)}")
@@ -373,20 +390,20 @@ def recovery_state(conn: sqlite3.Connection, head: str) -> dict[str, object]:
     candidate = running_at_head[0] if len(running_at_head) == 1 else None
     valid_candidate = candidate is not None and (
         (kept is None and candidate["iteration"] == 0)
-        or (kept is not None and candidate["parent_commit"] == kept["commit"]
+        or (kept is not None and candidate["parent_commit"] == effective_commit(conn, kept)
             and candidate["iteration"] > kept["iteration"])
     )
     if len(running_at_head) > 1:
         state = "inconsistent"
-    elif candidate and valid_candidate and (kept is None or kept["commit"] != head):
+    elif candidate and valid_candidate and (kept is None or effective_commit(conn, kept) != head):
         state = "integrated-pending"
-    elif kept is not None and kept["commit"] != head:
+    elif kept is not None and effective_commit(conn, kept) != head:
         state = "inconsistent"
     elif running:
         state = "interrupted"
     elif kept is None:
         state = "fresh" if not history else "baseline-required"
-    elif kept["commit"] == head:
+    elif effective_commit(conn, kept) == head:
         state = "clean"
     else:
         state = "inconsistent"
@@ -443,7 +460,7 @@ Fields:
   start_time         execution start timestamp
   end_time           execution end timestamp
   commit             evaluated commit hash
-  parent_commit      commit from which the experiment was derived
+  parent_commit      derived-from commit; contract baseline SHA for supplied baseline
   hypothesis         what is being tried and why
   metrics            object of key metric names and values
   status             running, failed, kept, or dropped
@@ -457,7 +474,11 @@ Additional terminal requirements:
   kept, dropped   end_time, metrics (JSON object), summary
   failed          end_time, summary
 
-Create as running before execution. Updates need only exp_id and changed fields.
+Supplied baseline: iteration 0 matching contract BASELINE.commit may be created
+as kept with metrics and summary; workspace, timestamps, and hypothesis are
+optional. commit tracks the source; parent_commit anchors branching and recovery.
+
+Otherwise create as running before execution. Updates need only exp_id and changed fields.
 Register all batch candidates before finalizing any. A new batch requires the
 previous batch to be terminal and uses maximum recorded iteration + 1. Baseline
 retries use 0 and unique IDs. Positive iterations derive from latest kept.

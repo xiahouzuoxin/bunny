@@ -12,7 +12,7 @@ Ask for MODEL_DIR if missing. Infer workspace for local execution or github for 
 - [Workspace](docs/workspace.md): reusable worktrees, SQLite, local training and evaluation only.
 - [GitHub](docs/github.md): plugin-based editing, branches, PR comments, and remote execution through Actions or its configured downstream runner.
 
-Inspect repository instructions, model code, evaluation, and execution configuration through that mode. Confirm scaffolding before using templates/ for an absent model. Confirm the contract before launching experiments; preserve confirmed contracts on resume.
+Inspect repository instructions, model code, evaluation, and execution configuration through that mode. Confirm scaffolding before using templates/ for an absent model. Before presenting the final contract, assess any user-supplied BASELINE and prepare its iteration-0 record using [baseline preparation](docs/experiment_loop.md#supplied-baseline-before-contract-confirmation). Print the contract in a human-readable format for review, and ask user for confirmation before launching experiments and each time it may change; preserve confirmed contracts on resume.
 
 | Parameter | Default | Meaning |
 |---|---|---|
@@ -29,6 +29,7 @@ Inspect repository instructions, model code, evaluation, and execution configura
 | MAX_ITERATIONS | Unlimited | Numbered batch attempts across resumes, excluding baseline |
 | NUM_WORKERS | 1 | Number of parallel experiments per non-baseline batch; positive integer |
 | OUTPUT_DIR | MODEL_DIR/.autoresearch | Mode-specific state and report location |
+| BASELINE | None | Optional prior baseline: commit, metrics, and available context |
 
 Discover dependencies in MODEL_DIR first. Inspect repository-level manifests or shared setup only when the model's configuration, imports, or documentation indicates they are needed; do not install repository-wide dependencies by default. Resolve dependency paths relative to MODEL_DIR unless explicitly stated otherwise.
 
@@ -50,7 +51,7 @@ Before creation, check exact names and ref-prefix conflicts in the selected mode
 
 Follow [the shared loop](docs/experiment_loop.md). The selected mode implements state access, commit preparation, execution, evidence collection, branch advancement, and cleanup. Never mix two authoritative stores for one session.
 
-After any exit, follow [report generation](docs/generate_report.md). Continue normal iterations autonomously within the contract; stop on inconsistent state, unavailable execution, or user interruption.
+After any exit of the experiment loop, follow [report generation](docs/generate_report.md) to summarize the experiments.
 
 ## Scope
 

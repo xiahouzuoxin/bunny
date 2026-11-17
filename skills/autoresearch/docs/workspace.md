@@ -6,7 +6,7 @@ This mode requires filesystem access, Git, and a Python runtime compatible with 
 
 ## Setup and state
 
-For a new session, resolve BASE_REF (default current HEAD) and create RESEARCH_BRANCH using the shared naming rule unless explicitly supplied. On resume, reuse the recorded branch. Default branches may be read as starting points but never used as the research branch. Inspect existing modifications before switching; preserve user changes and stop if they prevent a safe switch or would affect evaluation.
+For a new session, resolve BASE_REF (default current HEAD) and create RESEARCH_BRANCH using the shared naming rule unless explicitly supplied. On resume, reuse the recorded branch. Default branches may be read as starting points but never used as the research branch. Inspect existing modifications before switching; preserve user changes and resolve them before switching if they prevent a safe switch or would affect evaluation.
 
 Resolve OUTPUT_DIR once to an absolute path in the primary workspace. Keep it under MODEL_DIR unless the user confirms an external directory; exclude outputs from commits.
 
@@ -18,13 +18,13 @@ Choose worker paths during preparation and include them in the contract before c
 
 ## Prepare, execute, adopt
 
-- Baseline: commit only authorized preparation changes in the primary feature workspace before registering and evaluating; reuse HEAD if unchanged.
+- Baseline (unless imported): commit only authorized preparation changes in the primary feature workspace before registering and evaluating; reuse HEAD if unchanged.
 - Experiments: in each worker worktree, create and switch to a new branch named by the shared rule from parent_commit (for example, `git switch -c <experiment-branch> <parent_commit>`). Keep previous experiment branches and commits. Prefer temporary worktree directories and sparse checkout when the model is self-contained. Commit before registration.
 - Local execution: run ENTRYPOINT from MODEL_DIR in the worktree; write outputs outside tracked source files.
-- Adoption: verify research HEAD equals parent_commit and fast-forward to the winner. Preserve unrelated primary-workspace changes; stop if they prevent integration.
+- Adoption: verify research HEAD equals parent_commit and fast-forward to the winner. Preserve unrelated primary-workspace changes; resolve blockers before integration, then resume.
 
-Before reusing a worker, ensure its process has stopped, its previous experiment is terminal, and its commit and outputs are preserved. Keep per-experiment outputs in OUTPUT_DIR, outside the reusable worktree. The worktree must have no uncommitted changes or leftover generated files that could affect the next run; preserve unexpected files and stop to resolve them. Do not use hard reset, forced checkout, or blanket clean to switch experiments.
+Before reusing a worker, ensure its process has stopped, its previous experiment is terminal, and its commit and outputs are preserved. Keep per-experiment outputs in OUTPUT_DIR, outside the reusable worktree. The worktree must have no uncommitted changes or leftover generated files that could affect the next run; preserve unexpected files and resolve them before reuse, then resume. Do not use hard reset, forced checkout, or blanket clean to switch experiments.
 
 ## Exit
 
-Write REPORT.md and supplementary analysis into OUTPUT_DIR, then follow the shared cleanup confirmation step. After confirmation, remove the approved session-owned worker worktrees with Git worktree removal before deleting their approved local experiment branches. Do not force removal of dirty worktrees; preserve unexpected files and report the blocker. Dropped/failed branches may be unmerged: delete them only when confirmation covers losing that branch's code reference. This mode does not delete remote branches. Never remove the primary workspace or OUTPUT_DIR; retain unresolved worktrees and branches.
+Write reports and supplementary analysis into OUTPUT_DIR, then follow the shared cleanup confirmation step. After confirmation, remove the approved session-owned worker worktrees with Git worktree removal before deleting their approved local experiment branches. Do not force removal of dirty worktrees; preserve unexpected files and report the blocker. Dropped/failed branches may be unmerged: delete them only when confirmation covers losing that branch's code reference. This mode does not delete remote branches. Never remove the primary workspace or OUTPUT_DIR; retain unresolved worktrees and branches.
