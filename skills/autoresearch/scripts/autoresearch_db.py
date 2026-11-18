@@ -7,13 +7,14 @@ import argparse
 import json
 import re
 import sqlite3
+import subprocess
 import sys
 from pathlib import Path
 
 
 STATUSES = {"running", "failed", "kept", "dropped"}
 TERMINAL_STATUSES = {"failed", "kept", "dropped"}
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 IDENTITY_FIELDS = {
     "exp_id", "iteration", "contract_version", "workspace", "start_time",
     "commit", "parent_commit", "hypothesis",
@@ -41,7 +42,7 @@ def init_db(conn: sqlite3.Connection) -> None:
         raise ValueError("unversioned autoresearch database; recreate autoresearch.db")
     if current == 0:
         conn.executescript(
-            f"""
+            """
         BEGIN IMMEDIATE;
         CREATE TABLE contracts (
             version TEXT PRIMARY KEY,
@@ -68,18 +69,37 @@ def init_db(conn: sqlite3.Connection) -> None:
 
         CREATE UNIQUE INDEX one_kept_per_iteration
         ON experiments(iteration) WHERE status = 'kept';
-        PRAGMA user_version = {SCHEMA_VERSION};
+        PRAGMA user_version = 1;
         COMMIT;
         """
         )
+        current = 1
+    if current == 1:
         validate_schema(conn)
-        return
+        conn.executescript("""
+            BEGIN IMMEDIATE;
+            CREATE TABLE checkpoints (
+                commit_hash TEXT PRIMARY KEY,
+                parent_commit TEXT NOT NULL,
+                kept_exp_id TEXT NOT NULL REFERENCES experiments(exp_id),
+                contract_version TEXT NOT NULL REFERENCES contracts(version),
+                paths_json TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+            PRAGMA user_version = 2;
+            COMMIT;
+        """)
+        current = 2
     if current != SCHEMA_VERSION:
         raise ValueError(f"unsupported database schema version: {current}")
     validate_schema(conn)
 
 
 def validate_schema(conn: sqlite3.Connection) -> None:
+    if conn.execute("PRAGMA user_version").fetchone()[0] == 2:
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(checkpoints)")}
+        if columns != {"commit_hash", "parent_commit", "kept_exp_id", "contract_version", "paths_json", "created_at"}:
+            raise ValueError("invalid checkpoint schema")
     expected_contracts = {"version", "content_json", "created_at"}
     expected_experiments = {
         "exp_id", "iteration", "contract_version", "workspace", "start_time",
@@ -206,6 +226,59 @@ def effective_commit(conn: sqlite3.Connection, record: dict) -> str:
     return record["parent_commit"] if supplied_baseline(conn, record) else record["commit"]
 
 
+def list_checkpoints(conn: sqlite3.Connection) -> list[dict]:
+    return [dict(row) for row in conn.execute("SELECT * FROM checkpoints ORDER BY rowid")]
+
+
+def research_parent(conn: sqlite3.Connection, kept: dict) -> str:
+    """Advance the branching anchor without changing the evaluated identity."""
+    anchor = effective_commit(conn, kept)
+    for checkpoint in list_checkpoints(conn):
+        if checkpoint["kept_exp_id"] == kept["exp_id"]:
+            if checkpoint["parent_commit"] != anchor:
+                raise ValueError("broken checkpoint chain")
+            anchor = checkpoint["commit_hash"]
+    return anchor
+
+
+def put_checkpoint(conn: sqlite3.Connection, repo: str, commit: str,
+                   contract_version: str, paths: list[str]) -> None:
+    """Record an already committed, reviewed report update; verify Git structure."""
+    def git(*args: str) -> str:
+        result = subprocess.run(["git", "-C", repo, *args], capture_output=True, text=True)
+        if result.returncode:
+            raise ValueError(result.stderr.strip())
+        return result.stdout.rstrip("\n")
+
+    if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", commit):
+        raise ValueError("checkpoint requires a full commit SHA")
+    version = normalize_version(contract_version)
+    if get_contract(conn, version) is None:
+        raise ValueError("checkpoint requires a stored contract")
+    allowed = sorted(set(paths))
+    if not allowed or any(not path or path.startswith("/") or ".." in Path(path).parts for path in allowed):
+        raise ValueError("provide exact repository-relative report paths")
+    parents = git("rev-list", "--parents", "-n", "1", commit).split()
+    if len(parents) != 2:
+        raise ValueError("checkpoint must have exactly one parent")
+    changed = set(git("diff-tree", "--no-commit-id", "--name-only", "--no-renames", "-r", "-z", parents[1], commit).split("\0")) - {""}
+    if not changed or not changed.issubset(allowed):
+        raise ValueError("checkpoint changes files outside the reviewed report paths or is empty")
+    existing = conn.execute("SELECT * FROM checkpoints WHERE commit_hash = ?", (commit,)).fetchone()
+    if existing:
+        if existing["contract_version"] != version or existing["paths_json"] != json.dumps(allowed):
+            raise ValueError("checkpoint is immutable")
+        return
+    kept = latest_kept(conn)
+    if kept is None or any(item["status"] == "running" for item in experiments(conn)):
+        raise ValueError("checkpoint requires a kept model and no running experiments")
+    if parents[1] != research_parent(conn, kept) or git("rev-parse", "HEAD") != commit:
+        raise ValueError("checkpoint must advance the recorded research parent to current HEAD")
+    with conn:
+        conn.execute("INSERT INTO checkpoints(commit_hash, parent_commit, kept_exp_id, contract_version, paths_json) VALUES (?, ?, ?, ?, ?)",
+                     (commit, parents[1], kept["exp_id"], version, json.dumps(allowed)))
+
+
 def put_experiment(conn: sqlite3.Connection, record: object) -> None:
     if not isinstance(record, dict):
         raise ValueError("experiment record must be a JSON object")
@@ -252,8 +325,8 @@ def put_experiment(conn: sqlite3.Connection, record: object) -> None:
             if kept or active:
                 raise ValueError("finish the previous baseline attempt before retrying")
         else:
-            if kept is None or record["parent_commit"] != effective_commit(conn, kept):
-                raise ValueError("experiments must start from the latest kept commit")
+            if kept is None or record["parent_commit"] != research_parent(conn, kept):
+                raise ValueError("experiments must start from the recorded research parent")
             if record["commit"] == record["parent_commit"]:
                 raise ValueError("experiment commit must differ from its parent")
             if batch:
@@ -390,20 +463,20 @@ def recovery_state(conn: sqlite3.Connection, head: str) -> dict[str, object]:
     candidate = running_at_head[0] if len(running_at_head) == 1 else None
     valid_candidate = candidate is not None and (
         (kept is None and candidate["iteration"] == 0)
-        or (kept is not None and candidate["parent_commit"] == effective_commit(conn, kept)
+        or (kept is not None and candidate["parent_commit"] == research_parent(conn, kept)
             and candidate["iteration"] > kept["iteration"])
     )
     if len(running_at_head) > 1:
         state = "inconsistent"
-    elif candidate and valid_candidate and (kept is None or effective_commit(conn, kept) != head):
+    elif candidate and valid_candidate and (kept is None or research_parent(conn, kept) != head):
         state = "integrated-pending"
-    elif kept is not None and effective_commit(conn, kept) != head:
+    elif kept is not None and research_parent(conn, kept) != head:
         state = "inconsistent"
     elif running:
         state = "interrupted"
     elif kept is None:
         state = "fresh" if not history else "baseline-required"
-    elif effective_commit(conn, kept) == head:
+    elif research_parent(conn, kept) == head:
         state = "clean"
     else:
         state = "inconsistent"
@@ -411,6 +484,7 @@ def recovery_state(conn: sqlite3.Connection, head: str) -> dict[str, object]:
         "state": state,
         "head": head,
         "latest_kept": kept,
+        "research_parent": research_parent(conn, kept) if kept else None,
         "running": running,
         "experiment_count": len(history),
         "next_iteration": max((record["iteration"] for record in history), default=0) + 1,
@@ -481,7 +555,7 @@ optional. commit tracks the source; parent_commit anchors branching and recovery
 Otherwise create as running before execution. Updates need only exp_id and changed fields.
 Register all batch candidates before finalizing any. A new batch requires the
 previous batch to be terminal and uses maximum recorded iteration + 1. Baseline
-retries use 0 and unique IDs. Positive iterations derive from latest kept.
+retries use 0 and unique IDs. Positive iterations derive from the recorded research parent (latest kept plus report checkpoints).
 Identity fields (all required fields except status) never change. Terminal
 records are immutable. Successful runs awaiting a decision stay running with
 end_time, metrics, and summary saved. JSON is read from stdin unless
@@ -490,6 +564,12 @@ end_time, metrics, and summary saved. JSON is read from stdin unless
     experiment.add_argument("--json-file", help="Read JSON from file instead of stdin")
     sub.add_parser("list-experiments", help="Print all experiments in iteration order")
     sub.add_parser("latest-kept", help="Print the most recent kept experiment")
+    checkpoint = sub.add_parser("put-checkpoint", help="Record a reviewed report commit at research HEAD after all jobs settle")
+    checkpoint.add_argument("--repo", required=True, help="Primary research worktree")
+    checkpoint.add_argument("--commit", required=True, help="Full report commit SHA")
+    checkpoint.add_argument("--contract-version", required=True)
+    checkpoint.add_argument("--path", action="append", required=True, help="Exact reviewed non-executable report/contract artifact path; repeat as needed")
+    sub.add_parser("list-checkpoints", help="Print immutable report checkpoint history")
     recovery = sub.add_parser(
         "recovery-state",
         help="Classify startup state against the feature HEAD",
@@ -525,6 +605,10 @@ end_time, metrics, and summary saved. JSON is read from stdin unless
                 emit(experiments(conn))
             elif args.command == "latest-kept":
                 emit(latest_kept(conn))
+            elif args.command == "put-checkpoint":
+                put_checkpoint(conn, args.repo, args.commit, args.contract_version, args.path)
+            elif args.command == "list-checkpoints":
+                emit(list_checkpoints(conn))
             elif args.command == "recovery-state":
                 emit(recovery_state(conn, args.head))
             elif args.command == "by-commit":

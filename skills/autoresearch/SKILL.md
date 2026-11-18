@@ -20,7 +20,7 @@ Inspect repository instructions, model code, evaluation, and execution configura
 | MODEL_DIR | Required | Model directory relative to repository root |
 | REPOSITORY | Selected checkout in workspace mode | Target repository URL or owner/name; required for GitHub |
 | BASE_REF | Current branch / repository default | Starting ref, resolved once when creating a session |
-| RESEARCH_BRANCH | Auto-created using the naming rule below | Latest adopted model; explicit user choice takes precedence |
+| RESEARCH_BRANCH | Auto-created using the naming rule below | Latest adopted model plus report checkpoints; explicit user choice takes precedence |
 | ENTRYPOINT | Infer from model | Training and evaluation command relative to MODEL_DIR |
 | REQUIREMENTS | Infer from MODEL_DIR | Model-specific dependency manifest, environment, or setup command; none if unnecessary |
 | EXECUTION | Infer from model setup and available tools | Runner/workflow, launch mechanism (including baseline), resources, and retrieval/retention of final status, evaluated commit, metrics, and logs |
@@ -51,7 +51,7 @@ Before creation, check exact names and ref-prefix conflicts in the selected mode
 
 Follow [the shared loop](docs/experiment_loop.md). The selected mode implements state access, commit preparation, execution, evidence collection, branch advancement, and cleanup. Never mix two authoritative stores for one session.
 
-After any exit of the experiment loop, follow [report generation](docs/generate_report.md) to summarize the experiments.
+Keep contract/report updates on RESEARCH_BRANCH using the shared loop's checkpoint procedure. After any loop exit, follow [report generation](docs/generate_report.md).
 
 ## Scope
 

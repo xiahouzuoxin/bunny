@@ -1,6 +1,12 @@
 # Generate Report
 
-After any loop exit, generate a report summarizing the experiments. Write `OUTPUT_DIR/REPORT.md` in workspace mode or a report comment in GitHub mode. The principal is to provide a human-friendly summary of the experiment outcomes, model behavior, and key insights. It should at least cover takeaways, model card, baseline vs best comparison, and iteration history as below, but any other information are encouraged to be included if available and relevant.
+Refresh the report after baseline adoption/import and completed batches when findings change, and on every loop exit. Write `OUTPUT_DIR/REPORT.md`; see workspace operations for external output paths. GitHub mode also maintains a report comment.
+
+Use the [checkpoint procedure](experiment_loop.md#5-checkpoint-contract-and-report) to commit updates. Until its conditions are met, keep an untracked draft or GitHub comment. If baseline failed, report the failure without inventing best-model metrics.
+
+Label evaluated model SHAs separately from report SHAs. Publish the new report commit link after committing; do not create another commit just to embed its own SHA.
+
+Summarize outcomes, model behavior, and insights using the sections below. Add other relevant evidence as useful.
 
 ### Takeaways
 

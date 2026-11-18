@@ -8,9 +8,11 @@ This mode requires filesystem access, Git, and a Python runtime compatible with 
 
 For a new session, resolve BASE_REF (default current HEAD) and create RESEARCH_BRANCH using the shared naming rule unless explicitly supplied. On resume, reuse the recorded branch. Default branches may be read as starting points but never used as the research branch. Inspect existing modifications before switching; preserve user changes and resolve them before switching if they prevent a safe switch or would affect evaluation.
 
-Resolve OUTPUT_DIR once to an absolute path in the primary workspace. Keep it under MODEL_DIR unless the user confirms an external directory; exclude outputs from commits.
+Resolve OUTPUT_DIR once to an absolute path in the primary workspace. Keep it under MODEL_DIR unless the user confirms an external directory. Stage only reviewed report files, never the whole output directory.
 
-Use `${SKILL_DIR}/scripts/autoresearch_db.py --db "$OUTPUT_DIR/autoresearch.db"` for all state access. Read top-level and relevant command --help first. Initialize with init; SQLite is the only authoritative store. The CLI implements the shared lifecycle and recovery rules.
+If OUTPUT_DIR is outside the repository, record MODEL_DIR/.autoresearch as the tracked report destination in the contract. Keep runtime state in OUTPUT_DIR; copy report files to the tracked destination for versioning.
+
+Use `${SKILL_DIR}/scripts/autoresearch_db.py --db "$OUTPUT_DIR/autoresearch.db"` for all state access. Read top-level and relevant command --help first. Initialize with init; SQLite is the only authoritative store. The CLI handles lifecycle and recovery, including migration from schema v1 to v2 without changing experiment records.
 
 Store execution evidence under `$OUTPUT_DIR/experiments/$EXP_ID/`, including commands and job identifiers for recovery.
 
@@ -24,6 +26,21 @@ Choose worker paths during preparation and include them in the contract before c
 - Adoption: verify research HEAD equals parent_commit and fast-forward to the winner. Preserve unrelated primary-workspace changes; resolve blockers before integration, then resume.
 
 Before reusing a worker, ensure its process has stopped, its previous experiment is terminal, and its commit and outputs are preserved. Keep per-experiment outputs in OUTPUT_DIR, outside the reusable worktree. The worktree must have no uncommitted changes or leftover generated files that could affect the next run; preserve unexpected files and resolve them before reuse, then resume. Do not use hard reset, forced checkout, or blanket clean to switch experiments.
+
+## Report checkpoints
+
+Follow [step 5](experiment_loop.md#5-checkpoint-contract-and-report). Save REPORT.md, the versioned CONTRACT.json snapshot, and selected report artifacts under OUTPUT_DIR (also copy them to the tracked destination if external). Exclude runtime outputs from commits. Check that report files and Git hooks cannot affect execution.
+
+After committing on the primary research branch, record the checkpoint with the database CLI:
+
+```text
+put-checkpoint --repo <primary-worktree> --commit <full-SHA> \
+  --contract-version <version> --path <repo-relative-file> ...
+```
+
+Repeat `--path` for each reviewed file. The helper checks Git ancestry, changed paths, HEAD, contract existence, and settled records; you must still review content for effects on experiments.
+
+Use `list-checkpoints` for history and `recovery-state` for the current `research_parent` and `latest_kept`. After an interrupted commit, follow step 5’s recovery checks before retrying `put-checkpoint`.
 
 ## Exit
 
