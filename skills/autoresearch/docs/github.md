@@ -14,7 +14,7 @@ Record the discovered workflow, triggers, resources, result retrieval, and reten
 
 ## Branches and state
 
-After contract confirmation, create RESEARCH_BRANCH using the shared naming rule from resolved BASE_REF. Resolve OUTPUT_DIR as a repository-relative output path (default MODEL_DIR/.autoresearch). Commit the initial contract snapshot to OUTPUT_DIR/CONTRACT.json, then open a draft research PR against the starting branch. If BASE_REF is a SHA/tag, confirm the PR target branch first. Return and retain the PR URL as the session locator; on resume, read that PR instead of creating another session.
+After contract confirmation, create RESEARCH_BRANCH using the shared naming rule from resolved BASE_REF. Resolve OUTPUT_DIR as a repository-relative output path (default MODEL_DIR/.autoresearch). Commit the initial contract snapshot to OUTPUT_DIR/contract.json, then open a draft research PR against the starting branch. If BASE_REF is a SHA/tag, confirm the PR target branch first. Return and retain the PR URL as the session locator; on resume, read that PR instead of creating another session.
 
 The initial contract commit is the baseline starting point; subsequent batches use the recorded research parent. For supplied BASELINE, use the shared import rules and prevent PR creation from triggering a redundant baseline run. Otherwise, evaluate this commit as baseline: Register baseline before triggering evaluation. PR creation must not launch baseline before registration; verify a separate available trigger, a gated PR workflow, or an initially created baseline record that can reference its evidence location before PR creation. Do not assume the initial PR event alone provides a safely registered baseline run.
 
@@ -22,7 +22,7 @@ Use research PR comments as the authoritative state store:
 - Contract versions: one marked comment per version, immutable after confirmation; seed version 1.0 from the committed contract. Update the file from confirmed comments at each checkpoint.
 - Experiments: one comment per exp_id, marked `autoresearch:experiment:<exp_id>`, containing the complete shared record and readable evidence. Create running before launch (except imported baseline); update the same comment and never modify terminal records. Log points to the comment or durable evidence URL.
 - Checkpoints: one immutable comment per report commit marked `autoresearch:checkpoint:<full-SHA>`, with the shared checkpoint fields. Read alongside experiment comments for recovery.
-- Report: REPORT.md and selected report artifacts on RESEARCH_BRANCH, plus a marked report comment with readable tables and a link to the committed report. PR body contains a rebuildable summary and links, not independent state.
+- Report: a marked comment with readable tables and a link to the committed report. The PR body contains a rebuildable summary and links, not independent state.
 
 Before updates, re-read records and enforce the shared lifecycle. Only the orchestrator edits marked records; comments have no transactional or expected-SHA protection. Save and use comment IDs. After ambiguous writes, search by marker and exp_id before retrying; duplicate/conflicting records require reconciliation. Register every batch candidate before launching any job; interrupted partial registration is handled by shared recovery.
 
@@ -49,7 +49,7 @@ Verify research HEAD equals parent_commit and candidate ancestry. Advance the re
 
 Experiment PRs are execution/review surfaces. Do not squash/merge them to manufacture a different evaluated SHA. Retain experiment branches until the shared cleanup confirmation step. Include closing settled experiment PRs in the proposed cleanup scope if needed; never close the research PR as experiment cleanup.
 
-Follow [step 5](experiment_loop.md#5-checkpoint-contract-and-report) for report commits. Use the same expected-old-HEAD guard as adoption. After confirming the ref update, append the checkpoint comment; check its marker before retrying a write. Rebuild CONTRACT.json from confirmed contract comments.
+For report commits, use the same expected-old-HEAD guard as adoption. After confirming the ref update, append the checkpoint comment; check its marker before retrying a write.
 
 Update the report comment and link the committed report from the PR body and final response. If checkpoint conditions are unmet, publish only the comment for now. Do not merge the research PR without a user request. Retain unresolved job references if cancellation is unavailable.
 

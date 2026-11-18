@@ -8,7 +8,7 @@ This mode requires filesystem access, Git, and a Python runtime compatible with 
 
 For a new session, resolve BASE_REF (default current HEAD) and create RESEARCH_BRANCH using the shared naming rule unless explicitly supplied. On resume, reuse the recorded branch. Default branches may be read as starting points but never used as the research branch. Inspect existing modifications before switching; preserve user changes and resolve them before switching if they prevent a safe switch or would affect evaluation.
 
-Resolve OUTPUT_DIR once to an absolute path in the primary workspace. Keep it under MODEL_DIR unless the user confirms an external directory. Stage only reviewed report files, never the whole output directory.
+Resolve OUTPUT_DIR once to an absolute path in the primary workspace. Keep it under MODEL_DIR unless the user confirms an external directory. Exclude runtime outputs through Git’s info/exclude. Check staged files too; ignore rules do not protect already tracked files.
 
 If OUTPUT_DIR is outside the repository, record MODEL_DIR/.autoresearch as the tracked report destination in the contract. Keep runtime state in OUTPUT_DIR; copy report files to the tracked destination for versioning.
 
@@ -29,9 +29,7 @@ Before reusing a worker, ensure its process has stopped, its previous experiment
 
 ## Report checkpoints
 
-Follow [step 5](experiment_loop.md#5-checkpoint-contract-and-report). Save REPORT.md, the versioned CONTRACT.json snapshot, and selected report artifacts under OUTPUT_DIR (also copy them to the tracked destination if external). Exclude runtime outputs from commits. Check that report files and Git hooks cannot affect execution.
-
-After committing on the primary research branch, record the checkpoint with the database CLI:
+After committing report updates on the primary research branch, record the checkpoint with the database CLI:
 
 ```text
 put-checkpoint --repo <primary-worktree> --commit <full-SHA> \
@@ -44,4 +42,4 @@ Use `list-checkpoints` for history and `recovery-state` for the current `researc
 
 ## Exit
 
-Write reports and supplementary analysis into OUTPUT_DIR, then follow the shared cleanup confirmation step. After confirmation, remove the approved session-owned worker worktrees with Git worktree removal before deleting their approved local experiment branches. Do not force removal of dirty worktrees; preserve unexpected files and report the blocker. Dropped/failed branches may be unmerged: delete them only when confirmation covers losing that branch's code reference. This mode does not delete remote branches. Never remove the primary workspace or OUTPUT_DIR; retain unresolved worktrees and branches.
+After the shared cleanup confirmation, remove the approved session-owned worker worktrees with Git worktree removal before deleting their approved local experiment branches. Do not force removal of dirty worktrees; preserve unexpected files and report the blocker. Dropped/failed branches may be unmerged: delete them only when confirmation covers losing that branch's code reference. This mode does not delete remote branches. Never remove the primary workspace or OUTPUT_DIR; retain unresolved worktrees and branches.

@@ -53,6 +53,8 @@ Follow [the shared loop](docs/experiment_loop.md). The selected mode implements 
 
 Keep contract/report updates on RESEARCH_BRANCH using the shared loop's checkpoint procedure. After any loop exit, follow [report generation](docs/generate_report.md).
 
+After everything is complete, follow the cleanup confirmation step.
+
 ## Scope
 
 - Read default branches as needed, but never write experiments to main, master, or the repository default branch. Do not merge into the target branch without a user request.

@@ -51,6 +51,22 @@ At most one record per iteration may have status kept. Register the whole batch 
 
 Contract versions are immutable numeric dotted versions, starting at 1.0 and compared numerically. Append only newer versions; identical retries are idempotent. Load the latest contract only at each batch/baseline boundary, then freeze it. Recovery uses the versions referenced by existing records.
 
+### Output layout
+
+Both modes use the same layout under OUTPUT_DIR (default MODEL_DIR/.autoresearch):
+
+```text
+├── contract.json       # Latest confirmed contract snapshot
+├── report/
+│   ├── REPORT.md       # Report
+│   └── artifacts/      # Small files required by the report, such as figures, plots, etc.
+└── other outputs       # Won't commit to Git, such as database, logs, datasets, model weights etc.
+```
+
+Only contract.json and selected report/ files belong in Git. Keep large artifacts outside report/ and reference them from the report. Check file sizes and the complete diff before committing; never stage or upload OUTPUT_DIR wholesale. Keep one contract.json file; Git and the authoritative state store retain its history.
+
+When resuming an older session, move tracked CONTRACT.json and REPORT.md to these paths in the next report commit, preserving links and recording both old and new paths in its checkpoint.
+
 ## 1. Reconcile and prepare
 
 Read all records and research HEAD at startup and every batch boundary. Workspace offers recovery-state; GitHub applies the same checks to the research PR's marked experiment comments.
@@ -105,11 +121,11 @@ Once all records are terminal, follow step 5, then repeat from reconciliation un
 
 ## 5. Checkpoint contract and report
 
-After baseline adoption/import, each completed batch (even without a winner), and final reporting, check whether the contract or report needs updating. Only commit updates once a kept model exists, all experiments are terminal, and adoption is fully recorded.
+Generate the report after baseline adoption/import, update it after every completed batch (including failed or dropped experiments), and refresh it on exit. Commit only when a kept model exists, all experiments are terminal, and adoption is fully recorded.
 
-1. **Update:** Confirm contract changes before saving a new immutable version. Refresh the [report](generate_report.md) and confirmed contract snapshot as needed. These files are generated from the authoritative state store.
-2. **Commit:** If files changed, append one commit directly to RESEARCH_BRANCH. Include only reviewed report, contract, and non-executable report artifacts; exclude runtime data and scripts. Check the full diff cannot affect training, evaluation, dependencies, or job triggers. The commit must have the recorded research parent as its sole parent; guard the branch update against a changed HEAD. No changes means no commit.
-3. **Record:** Save an immutable checkpoint in the mode's state store: `commit_hash`, `parent_commit`, `kept_exp_id`, `contract_version`, and `paths_json` (reviewed repository-relative paths). Finish this write before making another commit.
+1. **Update:** Confirm contract changes before saving a new immutable version. Write the [report](generate_report.md) and latest confirmed contract snapshot from the authoritative state store.
+2. **Commit:** If files changed, append one commit directly to RESEARCH_BRANCH. Check the full diff cannot affect training, evaluation, dependencies, or job triggers. The commit must have the recorded research parent as its sole parent; guard the branch update against a changed HEAD. No changes means no commit.
+3. **Record:** Save an immutable checkpoint in the mode's state store: `commit_hash`, `parent_commit`, `kept_exp_id`, `contract_version`, and `paths_json` (reviewed repository-relative paths). Finish this write before making another commit. Publish the report commit link afterward; do not amend the report to embed its own SHA.
 4. **Continue:** Use the new HEAD as the next batch's `parent_commit`. Keep historical experiment records and evaluated SHAs unchanged; comparisons still use the latest kept model's metrics. If the evaluation protocol changed, resolve metric comparability before continuing.
 
 The **recorded research parent** is the latest kept model's effective commit, or its latest report checkpoint if one exists. Adopting a new winner resets it to that winner's evaluated commit. Report commits carry no evaluation metrics.
